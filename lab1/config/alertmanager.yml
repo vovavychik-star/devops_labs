@@ -1,0 +1,11 @@
+route:
+  receiver: 'log-alerts'
+  group_by: ['alertname']
+  group_wait: 5s
+  group_interval: 10s
+  repeat_interval: 1h
+
+receivers:
+  - name: 'log-alerts'
+    webhook_configs:
+      - url: 'http://localhost:9093' # Alertmanager умеет отправлять на вебхуки, для лабы этого достаточно

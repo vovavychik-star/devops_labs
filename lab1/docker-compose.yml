@@ -1,0 +1,121 @@
+version: '3.8'
+
+networks:
+  monitoring:
+    driver: bridge
+
+services:
+  # 1. Наш веб-сервис
+  app:
+    build: ./app
+    container_name: lab-app
+    ports:
+      - "8000:8000"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+    networks:
+      - monitoring
+    depends_on:
+      - jaeger
+
+  # 2. Метрики — Prometheus
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: lab-prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/alerts.yml:/etc/prometheus/alerts.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+    depends_on:
+      - app
+
+  # 3. Алертинг — Alertmanager
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    container_name: lab-alertmanager
+    volumes:
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+    networks:
+      - monitoring
+
+  # 4. Трейсы — Jaeger (All-In-One)
+  jaeger:
+    image: jaegertracing/all-in-one:1.47
+    container_name: lab-jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - monitoring
+
+  # 5. Хранилище логов — Loki
+  loki:
+    image: grafana/loki:2.8.2
+    container_name: lab-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - monitoring
+
+  # 6. Агент сбора логов — Promtail (Исправленный блок)
+  promtail:
+    image: grafana/promtail:2.8.2
+    container_name: lab-promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    entrypoint:
+      - "sh"
+      - "-c"
+      - |
+        cat << 'INNER_EOF' > /etc/promtail/config.yml
+        server:
+          http_listen_port: 9080
+          grpc_listen_port: 0
+
+        positions:
+          filename: /tmp/positions.yaml
+
+        clients:
+          - url: http://loki:3100/loki/api/v1/push
+
+        scrape_configs:
+          - job_name: docker
+            docker_sd_configs:
+              - host: unix:///var/run/docker.sock
+                refresh_interval: 5s
+            relabel_configs:
+              - source_labels: ['__meta_docker_container_name']
+                regex: '/lab-app'
+                target_label: 'container'
+        INNER_EOF
+        /usr/bin/promtail -config.file=/etc/promtail/config.yml
+    networks:
+      - monitoring
+    depends_on:
+      - loki
+
+  # 7. Визуализация — Grafana
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: lab-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+      - loki

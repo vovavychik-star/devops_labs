@@ -1,0 +1,29 @@
+groups:
+  - name: service_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: sum(rate(http_errors_total[1m])) / sum(rate(http_requests_total[1m])) * 100 > 10
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Высокий уровень ошибок на сервисе!"
+          description: "Доля ошибок 5xx превысила 10% за последнюю минуту."
+
+      - alert: HighRPS
+        expr: sum(rate(http_requests_total[1m])) > 15
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Аномальный всплеск интенсивности запросов (RPS)!"
+          description: "Общий RPS превысил 15 запросов в секунду."
+
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le)) > 1.5
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Рост перцентиля времени ответа p95!"
+          description: "95% запросов обрабатываются дольше чем 1.5 секунды."
